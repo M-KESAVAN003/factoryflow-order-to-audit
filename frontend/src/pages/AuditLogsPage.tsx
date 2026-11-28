@@ -77,6 +77,7 @@ export function AuditLogsPage() {
           <option value="floor_supervisor">Floor Supervisor</option>
           <option value="qa_inspector">QA Inspector</option>
           <option value="auditor">Compliance Auditor</option>
+          <option value="owner">Factory Owner</option>
           <option value="anonymous">Anonymous</option>
         </select>
         <select

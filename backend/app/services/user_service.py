@@ -17,6 +17,7 @@ DEFAULT_SEED_USERS = [
     ("floor@factoryflow.io", "Devon Brooks", "Manufacturing Operations", Role.FLOOR_SUPERVISOR),
     ("qa@factoryflow.io", "Priya Nair", "Quality & Release", Role.QA_INSPECTOR),
     ("auditor@factoryflow.io", "Julian Ortiz", "Audit & Regulatory", Role.AUDITOR),
+    ("owner@factoryflow.io", "Kavitha Sundaram", "Executive Ownership", Role.OWNER),
 ]
 
 

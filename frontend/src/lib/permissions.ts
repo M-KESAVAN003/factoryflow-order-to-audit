@@ -45,6 +45,13 @@ export const ROLE_META: Record<
     accentClasses: "bg-slate-700",
     description: "Read-only end-to-end traceability and immutable audit trail.",
   },
+  owner: {
+    label: "Factory Owner",
+    shortLabel: "Owner",
+    badgeClasses: "bg-purple-50 text-purple-800 border-purple-200",
+    accentClasses: "bg-purple-700",
+    description: "Executive read-only oversight across KPIs, margins, GST, and receivables.",
+  },
 };
 
 export function hasPermission(user: UserProfile | null, permission: string): boolean {

@@ -32,6 +32,7 @@ describe("Role-based dashboards & route guards", () => {
     ["floor_supervisor", ["dashboard:view", "roles:read", "orders:read", "production:read", "production:manage", "qa:read"]],
     ["qa_inspector", ["dashboard:view", "roles:read", "orders:read", "production:read", "qa:read", "qa:manage"]],
     ["auditor", ["dashboard:view", "roles:read", "audit:read", "orders:read", "production:read", "qa:read"]],
+    ["owner", ["dashboard:view", "roles:read", "audit:read", "owner_dashboard:view", "reports:view", "reports:export"]],
   ])("renders dedicated dashboard layout for %s", async (role, permissions) => {
     setStoredToken("valid-jwt");
     vi.spyOn(api, "me").mockResolvedValue(buildUser(role, permissions));

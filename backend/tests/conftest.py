@@ -19,6 +19,7 @@ ROLE_EMAILS: Dict[Role, str] = {
     Role.FLOOR_SUPERVISOR: "floor@factoryflow.io",
     Role.QA_INSPECTOR: "qa@factoryflow.io",
     Role.AUDITOR: "auditor@factoryflow.io",
+    Role.OWNER: "owner@factoryflow.io",
 }
 
 

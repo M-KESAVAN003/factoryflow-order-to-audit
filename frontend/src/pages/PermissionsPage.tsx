@@ -49,10 +49,10 @@ export function PermissionsPage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">
-          Five-Role Access Control Matrix
+          Role-Based Access Control Matrix
         </h2>
         <p className="text-xs text-slate-500">
-          Live permission definitions served directly from the FastAPI RBAC registry.
+          Live permission definitions served directly from the FastAPI RBAC registry (Admin, Owner, Order/Salesman, Floor Supervisor, Auditor, plus optional QA Inspector).
         </p>
       </div>
 

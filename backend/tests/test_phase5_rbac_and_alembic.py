@@ -22,6 +22,7 @@ from tests.conftest import auth_headers_for
         (Role.FLOOR_SUPERVISOR, 403, 403, 403, 403, 403, 403, 403),
         (Role.QA_INSPECTOR, 403, 403, 403, 403, 403, 403, 403),
         (Role.AUDITOR, 200, 403, 403, 200, 403, 200, 403),
+        (Role.OWNER, 200, 403, 403, 200, 403, 200, 403),
     ],
 )
 def test_phase5_role_permissions_matrix(

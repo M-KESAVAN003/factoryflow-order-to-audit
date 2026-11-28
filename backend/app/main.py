@@ -32,6 +32,18 @@ def validate_production_settings(settings: Settings) -> None:
         raise RuntimeError(
             "SECRET_KEY / JWT_SECRET_KEY must be at least 32 characters in production."
         )
+    if (
+        settings.is_production
+        and settings.seed_default_users
+        and (
+            settings.seed_default_password.strip()
+            in {"", "FactoryFlow!2026", "replace-with-custom-non-default-demo-password"}
+            or len(settings.seed_default_password.strip()) < 12
+        )
+    ):
+        raise RuntimeError(
+            "DEMO_SEED_ENABLED=true in production requires a unique custom DEMO_SEED_PASSWORD (>=12 chars)."
+        )
 
 
 def init_database() -> None:

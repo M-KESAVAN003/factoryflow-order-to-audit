@@ -12,6 +12,7 @@ const ALL_ROLES: Role[] = [
   "floor_supervisor",
   "qa_inspector",
   "auditor",
+  "owner",
 ];
 
 export function UsersPage() {
@@ -97,7 +98,7 @@ export function UsersPage() {
             Users & Role Provisioning
           </h2>
           <p className="text-xs text-slate-500">
-            Assign personnel to one of the five FactoryFlow roles. Every change is audited.
+            Assign personnel to one of the FactoryFlow operational roles (including dedicated read-only Owner). Every change is audited.
           </p>
         </div>
         <button

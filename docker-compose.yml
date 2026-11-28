@@ -25,7 +25,7 @@ services:
       DATABASE_URL: postgresql://factoryflow:${POSTGRES_PASSWORD:-factoryflow_local_only}@db:5432/factoryflow_dev?sslmode=disable
       SECRET_KEY: ${SECRET_KEY:-local-docker-only-secret-change-in-production-32chars}
       CORS_ORIGINS: '["http://localhost:5173","http://localhost:4173"]'
-      DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-true}
-      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-FactoryFlow!2026}
+      DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-false}
+      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-replace-with-custom-non-default-demo-password}
     ports:
       - "8000:8000"

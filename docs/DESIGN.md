@@ -3,8 +3,8 @@
 ## 1. Architecture Overview & Technology Stack
 FactoryFlow is an Order-to-Audit Manufacturing ERP unifying sales ordering, GST invoicing, BOM production, weighted-average inventory, costing, payments, and executive audit reporting.
 - **Frontend**: React 18, TypeScript, Tailwind CSS 3, Vite 6, IndexedDB + Service Worker PWA (`frontend/public/sw.js`).
-- **Backend**: Python 3.13, FastAPI, SQLAlchemy 2.0 (`Decimal` + `NUMERIC`), Pydantic v2, Alembic (`0001`–`0007`).
-- **Database**: Persistent PostgreSQL (Neon / managed PG with `sslmode=require` via `psycopg` v3).
+- **Backend**: Python 3.13, FastAPI, SQLAlchemy 2.0 (`Decimal` + `NUMERIC`), Pydantic v2, Alembic (`0001`–`0008`), server-enforced RBAC across 5 canonical roles (`admin`, `owner`, `order_manager`, `floor_supervisor`, `auditor`, plus optional `qa_inspector`).
+- **Database**: Persistent PostgreSQL (Neon / managed PG with `sslmode=require` via `psycopg` v3). Report reconciliation flags cross-verify `StockLedger`, `StockBalance`, `ProductionMaterial`, `ProductionExpense`, `Invoice`, `Dispatch`, `Payment`, and `PaymentAllocation` records directly.
 
 ## 2. Core Entity Relationship Diagram
 ```mermaid

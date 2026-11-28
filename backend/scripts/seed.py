@@ -47,7 +47,6 @@ from app.services.user_service import DEFAULT_SEED_USERS, create_user, seed_defa
 
 EXTRA_DEMO_USERS = [
     ("salesman_b@factoryflow.io", "Salesman B (Demo)", "Field Sales", Role.ORDER_MANAGER),
-    ("owner@factoryflow.io", "Factory Owner (Demo)", "Executive Ownership", Role.ADMIN),
 ]
 
 
@@ -87,6 +86,15 @@ def main() -> None:
     if not settings.seed_default_users and not args.force_demo:
         raise RuntimeError(
             "Set DEMO_SEED_ENABLED=true or pass --force-demo to populate dummy demo accounts."
+        )
+    if settings.is_production and (
+        settings.seed_default_password.strip()
+        in {"", "FactoryFlow!2026", "replace-with-custom-non-default-demo-password"}
+        or len(settings.seed_default_password.strip()) < 12
+    ):
+        raise RuntimeError(
+            "Refusing hosted demo seed with default or placeholder DEMO_SEED_PASSWORD. "
+            "Configure a unique custom DEMO_SEED_PASSWORD (>=12 chars) first."
         )
 
     print("Connecting to database...")

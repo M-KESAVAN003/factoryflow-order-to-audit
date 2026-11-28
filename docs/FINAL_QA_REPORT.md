@@ -4,9 +4,9 @@
 - **Backend Runtime**: Python `3.13.17`, FastAPI `0.115.6`, SQLAlchemy `2.0.36`, Alembic `1.14.0`, Pydantic `2.10.3`.
 - **Frontend Runtime**: Node.js `v20.18.0`, React `18.3.1`, TypeScript `5.6.3`, Vite `6.4.6`, Vitest `2.1.9`.
 - **Database Isolation**:
-  - `backend/scripts/benchmark_reset_seed.py` enforces strict safety guards (`ENVIRONMENT != production`, target URL must differ from `DATABASE_URL` / `settings.database_url`, PostgreSQL DB names must contain `test`, `benchmark`, or `qa`) and verifies idempotent double-seeding across Alembic head `0007_phase8_offline_sync`.
-  - Automated backend suites (`pytest`) ran against isolated in-memory / temporary SQLite test databases matching the Alembic schema (`0001_phase1` through `0007_phase8_offline_sync`).
-  - **Environment Disclosure**: Neither a live Neon PostgreSQL instance (`backend/.env` / `DATABASE_URL`) nor Playwright/Chromium is provisioned in the local environment; live PostgreSQL network execution and physical Android Chrome offline installation remain unverified outside isolated SQLite / JSDOM runs.
+  - `backend/scripts/benchmark_reset_seed.py` enforces strict safety guards (`ENVIRONMENT != production`, target URL must differ from `DATABASE_URL` / `settings.database_url`, PostgreSQL DB names must contain `test`, `benchmark`, or `qa`) and verifies idempotent double-seeding across Alembic head `0008_phase10_owner_role` (`6` base role accounts including `owner@factoryflow.io`).
+  - Automated backend suites (`pytest`) ran against isolated in-memory / temporary SQLite test databases matching the Alembic schema (`0001_phase1` through `0008_phase10_owner_role`).
+  - **Environment Disclosure**: Neither a live Neon PostgreSQL instance (`backend/.env` / `DATABASE_URL`) nor Playwright/Chromium is provisioned in the local environment; live PostgreSQL network execution, Render/Vercel live deployments, and physical Android Chrome offline installation remain unverified outside isolated SQLite / JSDOM runs.
 
 ---
 
@@ -36,21 +36,24 @@ Executed sequentially without duplicate transactions in `backend/tests/test_phas
 
 ---
 
-## 4. Bugs Discovered & Fixed Across QA
+## 4. Bugs Discovered & Fixed Across QA & Pre-Deployment Audit
 1. **Purchase Register Reconciliation Flag (`backend/app/services/reporting_service.py`)**:
-   - *Root Cause*: `report_purchase_register` returned `reconciled_with_purchases=True` statically without verifying that posted line totals equal `posted_total`.
-   - *Fix*: Computed `posted_line_tot` and verified `abs(posted_line_tot - posted_tot) <= Decimal("0.05")` when no item filter is active.
-2. **Async Rendering & Strict Matchers in Frontend Tests**:
+   - *Root Cause*: Early `report_purchase_register` returned `reconciled_with_purchases=True` statically; other report flags (`reconciled_with_ledger`, `reconciled_with_runs`, `reconciled_with_expenses_and_ledger`) also fell back unconditionally to `True` in Phase 7/9.
+   - *Fix*: Replaced every unconditional `True` with real SQLAlchemy DB cross-checks (`StockLedger` vs `StockBalance`, `ProductionMaterial` vs `PRODUCTION_ISSUE`, `actual_good_output` vs `PRODUCTION_OUTPUT`, `ProductionExpense` vs costing totals, `Dispatch` vs `SALES_DISPATCH`, `Invoice` lines vs headers, `Purchase` lines vs headers + `PURCHASE_RECEIPT`, and `Payment` vs `PaymentAllocation`). Added `test_report_reconciliations_detect_database_mismatches` confirming each flag returns `False` on injected DB mismatches.
+2. **Dedicated Read-Only `OWNER` Role Architecture (`0008_phase10_owner_role`)**:
+   - *Root Cause*: `owner@factoryflow.io` previously used `Role.ADMIN` while `Role.OWNER` did not exist as a dedicated read-only role.
+   - *Fix*: Added `Role.OWNER = "owner"` across `permissions.py`, `user_service.py`, `dashboard_service.py`, Alembic migration `0008_phase10_owner_role`, and React RBAC (`OwnerRoleDashboard.tsx`, `RoleDashboard.test.tsx`). Verified `OWNER` cannot manage users, approve/create orders/invoices/dispatches, modify purchases/inventory/production, or record payments (`403`).
+3. **Async Rendering & Strict Matchers in Frontend Tests**:
    - *Root Cause*: Asynchronous state resolution timing in `OwnerAndAuditReportsPages.test.tsx` (`findAllByText`) and multi-badge rendering in `OfflinePwaSync.test.tsx`.
    - *Fix*: Corrected async queries cleanly in the Vitest suites and enforced strict `Role` typing on `OfflineSessionMeta`.
 
 ---
 
 ## 5. Automated Suite Totals
-- **Backend (`pytest -v`)**: **`79` passed, `0` failed, `0` skipped** (`413.24s`).
-- **Frontend (`vitest run`)**: **`9` test files, `24` passed, `0` failed, `0` skipped** (`43.12s`).
-- **Frontend Production Build (`tsc -b && vite build`)**: **Passed** (`1669` modules transformed in `18.26s`).
-- **Total Automated Tests**: **`103` passed, `0` failed, `0` skipped**.
+- **Backend (`pytest -v`)**: **`89` passed, `0` failed, `0` skipped** (`562.75s`, exit code `0`).
+- **Frontend (`vitest run`)**: **`9` test files, `26` passed, `0` failed, `0` skipped** (`49.99s`, exit code `0`, verified on Node `v26.13.1` with JSDOM).
+- **Frontend Production Build (`tsc -b && vite build`)**: **Passed** (`1670` modules transformed in `30.50s`, exit code `0`).
+- **Total Automated Tests**: **`115` passed, `0` failed, `0` skipped**.
 
 ---
 

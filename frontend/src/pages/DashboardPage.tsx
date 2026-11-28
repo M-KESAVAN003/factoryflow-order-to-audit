@@ -8,6 +8,7 @@ import { AdminDashboard } from "../components/dashboards/AdminDashboard";
 import { AuditorDashboard } from "../components/dashboards/AuditorDashboard";
 import { FloorSupervisorDashboard } from "../components/dashboards/FloorSupervisorDashboard";
 import { OrderManagerDashboard } from "../components/dashboards/OrderManagerDashboard";
+import { OwnerRoleDashboard } from "../components/dashboards/OwnerRoleDashboard";
 import { QaInspectorDashboard } from "../components/dashboards/QaInspectorDashboard";
 
 export function DashboardPage() {
@@ -94,6 +95,8 @@ export function DashboardPage() {
       return <QaInspectorDashboard data={data} checks={checks} />;
     case "auditor":
       return <AuditorDashboard data={data} checks={checks} />;
+    case "owner":
+      return <OwnerRoleDashboard data={data} checks={checks} />;
     default:
       return null;
   }

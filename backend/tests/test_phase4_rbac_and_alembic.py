@@ -22,6 +22,7 @@ from tests.conftest import auth_headers_for
         (Role.FLOOR_SUPERVISOR, 200, 403, 200, 201),
         (Role.QA_INSPECTOR, 200, 403, 200, 403),
         (Role.AUDITOR, 200, 403, 200, 403),
+        (Role.OWNER, 200, 403, 200, 403),
         (Role.ORDER_MANAGER, 403, 403, 403, 403),
     ],
 )

@@ -24,13 +24,16 @@ flowchart LR
 - **Cloud Targets**: Vercel (Frontend SPA + PWA), Render (FastAPI + Docker/Python), Neon (Managed PostgreSQL).
 
 ## 5. User Roles & Permissions
+FactoryFlow enforces strict role-based separation of duties across the five canonical internship roles (retaining `qa_inspector` as an optional quality gate role):
+
 | Role | Internal Key | Access Scope |
 | :--- | :--- | :--- |
-| **Factory Admin / Owner** | `admin` | Full governance, Owner Dashboard, approvals, GST invoicing, dispatches, adjustments |
+| **Factory Admin** | `admin` | Full governance, user/role provisioning, master data, order approvals, GST invoicing, dispatches, adjustments |
+| **Factory Owner** | `owner` | Dedicated read-only executive oversight (`/owner` 15-KPI dashboard, margins, all 15 audit reports, `.xlsx`/`.csv`/`.pdf` exports, audit trail); cannot modify users, purchases, inventory, production, orders, or invoices |
 | **Order & Production Manager (Salesman)** | `order_manager` | Assigned customers only, quick Mobile & Offline PWA orders, own order tracking |
 | **Shop Floor Supervisor** | `floor_supervisor` | Purchases, Inventory receipts, Production execution & run expenses |
-| **QA Inspector** | `qa_inspector` | BOM verification, production quality & wastage inspection |
 | **Compliance Auditor / Accountant** | `auditor` | Strictly read-only Finance/Auditor portals, all 15 audit reports & `.xlsx`/`.csv`/`.pdf` exports |
+| **QA Inspector *(Optional)*** | `qa_inspector` | BOM verification, production quality & wastage inspection |
 
 ## 6. Features by Development Phase
 - **Phases 1–2 (Core RBAC & Master Data)**: JWT authentication, 5 roles, immutable `audit_logs`, Products (`MUR-200`), Raw/Packaging `StockItem`s, Customers, Suppliers, and dimensional Unit Conversions.
@@ -40,7 +43,7 @@ flowchart LR
 - **Phase 6 (Costing, Overheads & Payments)**: Actual weighted-avg material cost + posted expenses (`Labour`, `Gas`, `Power`), pre-GST margin, customer payments, allocation dedup, Customer Ledger/Statement, 5-bucket ageing.
 - **Phase 7 (Owner Dashboard & Audit Reporting)**: Owner Console (15 KPIs, 10 trends, alerts), Auditor Portal, 15 audit reports with historical `as_of_date` ledger reconstruction, `.xlsx`/`.csv`/`.pdf` exports.
 - **Phase 8 (Offline PWA & Idempotent Sync)**: Web manifest, icons, SW shell cache (`/api/*` bypass), IndexedDB offline queue, auto-sync on launch/`online`, price conflict detection (`NEEDS_REVIEW`), `POST /api/v1/orders/sync` with unique `idempotency_key`.
-- **Phase 9–10 (E2E Benchmark QA & Deployment)**: Safety-guarded benchmark reset-and-seed CLI, 103 automated tests, Render/Vercel configs, 2-page PDF design note, submission docs.
+- **Phase 9–10 (E2E Benchmark QA & Deployment)**: Safety-guarded benchmark reset-and-seed CLI, 115 automated tests (`89` backend `pytest` + `26` frontend `vitest`), Alembic `0001`–`0008` (`owner` role + DB-backed report reconciliations), GitHub Actions CI (`.github/workflows/ci.yml`), Render/Vercel configs, 2-page PDF design note, submission docs.
 
 ## 7. Installation & Local Run Instructions (Docker-Free)
 
@@ -72,11 +75,14 @@ docker compose up --build
 - **Backend** ([backend/.env.example](backend/.env.example)): `DATABASE_URL`, `SECRET_KEY` (32+ chars), `ENVIRONMENT`, `CORS_ORIGINS`, `DEMO_SEED_ENABLED`, `DEMO_SEED_PASSWORD`. Never commit `.env`.
 - **Frontend** ([frontend/.env.example](frontend/.env.example)): `VITE_API_BASE_URL` (set to deployed Render `/api/v1` URL; never place secrets in `VITE_*` variables).
 
-## 9. Demo Login Accounts (Non-Production Evaluation Only)
-When `DEMO_SEED_ENABLED=true`, dummy accounts are provisioned with `DEMO_SEED_PASSWORD` (default `FactoryFlow!2026`):
-- Admin: `admin@factoryflow.io` | Owner: `owner@factoryflow.io`
-- Salesman A: `orders@factoryflow.io` | Salesman B: `salesman_b@factoryflow.io`
-- Supervisor: `floor@factoryflow.io` | QA: `qa@factoryflow.io` | Auditor: `auditor@factoryflow.io`
+## 9. Demo Login Accounts (Isolated / Hosted Evaluation Only)
+`DEMO_SEED_ENABLED` defaults to `false` in `.env.example` and `render.yaml`. For local non-production testing or explicit one-time hosted demo seeding, set `DEMO_SEED_ENABLED=true` together with a unique strong `DEMO_SEED_PASSWORD` (**never reuse publicly documented sample passwords such as `FactoryFlow!2026` on any live public deployment**):
+- **Factory Admin**: `admin@factoryflow.io` (`admin`)
+- **Factory Owner (Read-Only)**: `owner@factoryflow.io` (`owner`)
+- **Salesman A / Salesman B**: `orders@factoryflow.io`, `salesman_b@factoryflow.io` (`order_manager`)
+- **Production Supervisor**: `floor@factoryflow.io` (`floor_supervisor`)
+- **Accountant / Auditor**: `auditor@factoryflow.io` (`auditor`)
+- **QA Inspector (Optional)**: `qa@factoryflow.io` (`qa_inspector`)
 
 ## 10. Benchmark Seed & Results (Murukku 200 g)
 Isolated reset-and-seed command (blocked from executing against production or main `DATABASE_URL`):
@@ -92,11 +98,11 @@ Verified benchmark outputs (`Murukku 200 g`, selling price `₹50`, GST `5%`):
 
 ## 11. Automated Test Commands
 ```powershell
-# Backend (79 tests across Phases 1–9)
+# Backend (89 tests across Phases 1–10)
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 
-# Frontend (24 tests + production TypeScript/Vite build)
+# Frontend (26 tests + production TypeScript/Vite build)
 cd frontend
 npm test
 npm run build

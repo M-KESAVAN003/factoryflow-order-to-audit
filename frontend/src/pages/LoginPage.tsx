@@ -16,6 +16,7 @@ const SEED_DEMO_ACCOUNTS = [
   { role: "Floor Supv", email: "floor@factoryflow.io" },
   { role: "QA Insp", email: "qa@factoryflow.io" },
   { role: "Auditor", email: "auditor@factoryflow.io" },
+  { role: "Owner", email: "owner@factoryflow.io" },
 ];
 
 export function LoginPage() {
@@ -73,14 +74,14 @@ export function LoginPage() {
               Controlled manufacturing execution from customer order to immutable audit.
             </h1>
             <p className="text-sm leading-relaxed text-slate-300">
-              Sign in with your assigned operational identity. Every endpoint, view, and workflow transition is enforced by five-role access control and logged to Neon PostgreSQL.
+              Sign in with your assigned operational identity. Every endpoint, view, and workflow transition is enforced by strict role-based access control and logged to Neon PostgreSQL.
             </p>
           </div>
 
           <div className="mt-10 space-y-3 border-t border-slate-800 pt-8 text-xs text-slate-300">
             <div className="flex items-center gap-2.5">
               <ShieldCheck className="h-4 w-4 text-emerald-400" />
-              <span>Five-role RBAC separation of duties (Admin, Order, Floor, QA, Auditor)</span>
+              <span>RBAC separation of duties (Admin, Owner, Salesman/Order, Floor Supervisor, Auditor; plus optional QA Inspector)</span>
             </div>
             <div className="flex items-center gap-2.5">
               <Lock className="h-4 w-4 text-sky-400" />

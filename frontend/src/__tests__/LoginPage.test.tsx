@@ -95,4 +95,17 @@ describe("LoginPage", () => {
       "Invalid email or password."
     );
   });
+
+  it("includes dedicated Owner quick-fill and role summary on the login screen", async () => {
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("button", { name: /^owner$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Admin, Owner, Salesman\/Order/i)).toBeInTheDocument();
+  });
 });

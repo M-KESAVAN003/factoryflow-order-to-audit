@@ -3,7 +3,8 @@ export type Role =
   | "order_manager"
   | "floor_supervisor"
   | "qa_inspector"
-  | "auditor";
+  | "auditor"
+  | "owner";
 
 export interface UserProfile {
   id: string;
@@ -20,12 +21,12 @@ export interface UserProfile {
 
 export interface TokenResponse {
   access_token: string;
-  token_type: string;
+  token_type: "bearer";
   expires_in: number;
   user: UserProfile;
 }
 
-export interface RolePermissionSummary {
+export interface RoleMatrixItem {
   role: Role;
   display_name: string;
   department: string;
@@ -34,6 +35,6 @@ export interface RolePermissionSummary {
 }
 
 export interface RoleMatrixResponse {
-  roles: RolePermissionSummary[];
+  roles: RoleMatrixItem[];
   all_permissions: string[];
 }

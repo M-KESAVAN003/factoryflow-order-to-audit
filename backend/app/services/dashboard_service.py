@@ -184,6 +184,13 @@ def _build_role_stats(
             DashboardStat(key="permissions", label="Floor Capabilities", value=str(permissions_count), caption="Production write & QA read"),
             DashboardStat(key="database", label="Line Connectivity", value=db_label, caption=f"{personal_events_count} recent shift events"),
         ]
+    if user.role == Role.OWNER:
+        return [
+            DashboardStat(key="executive", label="Executive Scope", value="Read-Only", caption="Owner KPIs & full financial oversight"),
+            DashboardStat(key="audit", label="Total Audit Records", value=str(total_audit_events), caption="End-to-end compliance visibility"),
+            DashboardStat(key="permissions", label="Granted Permissions", value=str(permissions_count), caption="Business intelligence & report exports"),
+            DashboardStat(key="database", label="PostgreSQL Status", value=db_label, caption=f"{active_users} active personnel accounts"),
+        ]
     # QA_INSPECTOR
     return [
         DashboardStat(key="qa_team", label="QA Inspectors", value=str(role_distribution.get(Role.QA_INSPECTOR.value, 0)), caption="Inspection & release roster"),

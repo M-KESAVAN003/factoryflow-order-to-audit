@@ -4,13 +4,14 @@ from typing import Dict, FrozenSet, List
 
 
 class Role(str, Enum):
-    """Five canonical roles for the FactoryFlow Order-to-Audit platform."""
+    """Canonical roles for the FactoryFlow Order-to-Audit platform."""
 
     ADMIN = "admin"
     ORDER_MANAGER = "order_manager"
     FLOOR_SUPERVISOR = "floor_supervisor"
     QA_INSPECTOR = "qa_inspector"
     AUDITOR = "auditor"
+    OWNER = "owner"
 
 
 class Permission(str, Enum):
@@ -192,6 +193,40 @@ ROLE_DEFINITIONS: Dict[Role, RoleDefinition] = {
                 Permission.COSTING_READ,
                 Permission.PAYMENTS_READ,
                 Permission.RECEIVABLES_READ,
+                Permission.REPORTS_VIEW,
+                Permission.REPORTS_EXPORT,
+            }
+        ),
+    ),
+    Role.OWNER: RoleDefinition(
+        role=Role.OWNER,
+        display_name="Factory Owner",
+        department="Executive Ownership",
+        description="Read-only executive oversight across business KPIs, GST & financial reports, costing, inventory valuation, and compliance audit trails.",
+        permissions=frozenset(
+            {
+                Permission.DASHBOARD_VIEW,
+                Permission.ROLES_READ,
+                Permission.AUDIT_READ,
+                Permission.ORDERS_READ,
+                Permission.PRODUCTION_READ,
+                Permission.QA_READ,
+                Permission.PRODUCTS_READ,
+                Permission.STOCK_ITEMS_READ,
+                Permission.SUPPLIERS_READ,
+                Permission.CUSTOMERS_READ,
+                Permission.UNITS_READ,
+                Permission.INVENTORY_READ,
+                Permission.PURCHASES_READ,
+                Permission.BOM_READ,
+                Permission.PRODUCTION_RUNS_READ,
+                Permission.SALES_ORDERS_READ,
+                Permission.INVOICES_READ,
+                Permission.DISPATCHES_READ,
+                Permission.COSTING_READ,
+                Permission.PAYMENTS_READ,
+                Permission.RECEIVABLES_READ,
+                Permission.OWNER_DASHBOARD_VIEW,
                 Permission.REPORTS_VIEW,
                 Permission.REPORTS_EXPORT,
             }

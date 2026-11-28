@@ -131,7 +131,7 @@ def test_benchmark_reset_seed_safety_guards(tmp_path, monkeypatch):
     isolated_db = tmp_path / "isolated_benchmark_test.db"
     res = reset_and_seed_benchmark_db(f"sqlite:///{isolated_db}")
     assert res["idempotency_verified"] is True
-    assert res["users_created"] == 5
+    assert res["users_created"] == 6
     assert res["opening_entries"] == 6
     assert res["boms_created"] == 1
 

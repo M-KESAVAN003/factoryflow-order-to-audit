@@ -269,6 +269,7 @@ def test_owner_dashboard_reports_and_reconciliation(client, db_session):
     "role,owner_dash,reports_code,export_code",
     [
         (Role.ADMIN, 200, 200, 200),
+        (Role.OWNER, 200, 200, 200),
         (Role.AUDITOR, 403, 200, 200),
         (Role.ORDER_MANAGER, 403, 403, 403),
         (Role.FLOOR_SUPERVISOR, 403, 403, 403),
@@ -287,3 +288,88 @@ def test_phase7_rbac_and_auditor_read_only(client, role, owner_dash, reports_cod
         # Auditor must not mutate transactions
         assert client.post("/api/v1/orders", headers=headers, json={"customer_id": "x", "items": []}).status_code == 403
         assert client.post("/api/v1/payments", headers=headers, json={"customer_id": "x", "payment_method": "CASH", "amount_received": "10"}).status_code == 403
+
+
+def test_report_reconciliations_detect_database_mismatches(client, db_session):
+    """Verify report reconciliation flags reflect real database state and flip to False on mismatches."""
+    from app.models.costing_payment import Payment
+    from app.models.inventory import StockBalance
+    from app.models.production import ProductionMaterial, ProductionRun
+    from app.models.purchase import Purchase, PurchaseStatus
+    from app.models.sales import Invoice
+
+    _seed_full_benchmark_chain(db_session, client)
+    owner_headers = auth_headers_for(client, Role.OWNER)
+
+    # Sanity check: reconciled prior to injected mismatches
+    assert client.get("/api/v1/reports/stock/summary?preset=all", headers=owner_headers).json()["reconciled_with_ledger"] is True
+    assert client.get("/api/v1/reports/production?preset=all", headers=owner_headers).json()["reconciled_with_runs"] is True
+    assert client.get("/api/v1/reports/production/costing?preset=all", headers=owner_headers).json()["reconciled_with_expenses_and_ledger"] is True
+    assert client.get("/api/v1/reports/purchases?preset=all", headers=owner_headers).json()["reconciled_with_purchases"] is True
+    assert client.get("/api/v1/reports/sales?preset=all", headers=owner_headers).json()["reconciled_with_invoices"] is True
+    assert client.get("/api/v1/reports/payments?preset=all", headers=owner_headers).json()["reconciled_with_payments"] is True
+
+    # 1. Inject StockBalance drift vs StockLedger -> stock summary must report False
+    bal = db_session.scalar(select(StockBalance).limit(1))
+    orig_bal_qty = bal.available_quantity
+    bal.available_quantity = Decimal("9999.000000")
+    db_session.commit()
+    assert client.get("/api/v1/reports/stock/summary?preset=all", headers=owner_headers).json()["reconciled_with_ledger"] is False
+    bal.available_quantity = orig_bal_qty
+    db_session.commit()
+
+    # 2. Inject ProductionMaterial mismatch vs StockLedger(PRODUCTION_ISSUE) -> production register & costing must report False
+    pmat = db_session.scalar(select(ProductionMaterial).limit(1))
+    orig_consumed = pmat.total_consumed_base_qty
+    pmat.total_consumed_base_qty = Decimal("999.000000")
+    db_session.commit()
+    assert client.get("/api/v1/reports/production?preset=all", headers=owner_headers).json()["reconciled_with_runs"] is False
+    assert client.get("/api/v1/reports/production/costing?preset=all", headers=owner_headers).json()["reconciled_with_expenses_and_ledger"] is False
+    pmat.total_consumed_base_qty = orig_consumed
+    db_session.commit()
+
+    # 3. Inject Purchase header total mismatch vs line subtotals+tax -> purchase register must report False
+    pur = db_session.scalar(select(Purchase).where(Purchase.status == PurchaseStatus.POSTED).limit(1))
+    orig_pur_tot = pur.total_amount
+    pur.total_amount = Decimal("99999.00")
+    db_session.commit()
+    assert client.get("/api/v1/reports/purchases?preset=all", headers=owner_headers).json()["reconciled_with_purchases"] is False
+    pur.total_amount = orig_pur_tot
+    db_session.commit()
+
+    # 4. Inject Invoice grand_total mismatch vs line totals (via direct SQL to simulate out-of-band corruption)
+    from sqlalchemy import text
+
+    inv = db_session.scalar(select(Invoice).limit(1))
+    orig_inv_tot = inv.grand_total
+    db_session.execute(
+        text("UPDATE invoices SET grand_total = :val WHERE id = :id"),
+        {"val": "99999.00", "id": inv.id},
+    )
+    db_session.commit()
+    db_session.expire_all()
+    assert client.get("/api/v1/reports/sales?preset=all", headers=owner_headers).json()["reconciled_with_invoices"] is False
+    db_session.execute(
+        text("UPDATE invoices SET grand_total = :val WHERE id = :id"),
+        {"val": str(orig_inv_tot), "id": inv.id},
+    )
+    db_session.commit()
+    db_session.expire_all()
+
+    # 5. Inject Payment allocation mismatch -> payment register must report False
+    pay = db_session.scalar(select(Payment).limit(1))
+    orig_pay_alloc = pay.allocated_amount
+    pay.allocated_amount = Decimal("1.00")
+    db_session.commit()
+    assert client.get("/api/v1/reports/payments?preset=all", headers=owner_headers).json()["reconciled_with_payments"] is False
+    pay.allocated_amount = orig_pay_alloc
+    db_session.commit()
+
+    # 6. Inject ProductionRun actual_good_output drift vs StockLedger(PRODUCTION_OUTPUT) -> production register must report False
+    run = db_session.scalar(select(ProductionRun).limit(1))
+    orig_good = run.actual_good_output
+    run.actual_good_output = Decimal("500.000000")
+    db_session.commit()
+    assert client.get("/api/v1/reports/production?preset=all", headers=owner_headers).json()["reconciled_with_runs"] is False
+    run.actual_good_output = orig_good
+    db_session.commit()

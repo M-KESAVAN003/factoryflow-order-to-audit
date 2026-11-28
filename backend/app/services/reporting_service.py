@@ -5,14 +5,14 @@ from typing import Any, Dict, List, Tuple
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.costing_payment import CustomerPaymentStatus, Payment
+from app.models.costing_payment import CustomerPaymentStatus, ExpenseStatus, Payment, ProductionExpense
 from app.models.customer import Customer
-from app.models.inventory import MovementType, StockLedger
+from app.models.inventory import MovementType, StockBalance, StockLedger
 from app.models.stock_item import StockItem, StockItemType
 from app.models.product import Product
 from app.models.production import ProductionRun, ProductionStatus
 from app.models.purchase import Purchase, PurchaseStatus
-from app.models.sales import CreditNote, Invoice, SalesOrder, SalesOrderStatus, TaxType
+from app.models.sales import CreditNote, Dispatch, Invoice, SalesOrder, SalesOrderStatus, TaxType
 from app.schemas.reports import (
     CustomerSalesReportOut,
     CustomerSalesReportRow,
@@ -46,6 +46,7 @@ from app.schemas.reports import (
     StockSummaryReportRow,
 )
 from app.services.costing_service import build_run_costing
+from app.services.ledger_service import reconcile_stock_balances
 from app.services.payment_service import (
     _invoice_credit_map,
     _invoice_paid_map,
@@ -140,9 +141,42 @@ def report_sales_register(
         1 for o in all_orders if o.status in {SalesOrderStatus.REJECTED, SalesOrderStatus.CANCELLED}
     )
 
-    # Reconciliation against unfiltered Invoice totals when no product filter applied
+    # Reconcile invoice line items <-> invoice headers, dispatches <-> stock ledger, and report totals
+    lines_reconciled = True
+    for inv in invoices:
+        item_sub = sum((Decimal(it.taxable_value) for it in inv.items), Decimal("0.00")).quantize(AMT_PREC)
+        item_tot = sum((Decimal(it.line_total) for it in inv.items), Decimal("0.00")).quantize(AMT_PREC)
+        if item_sub != Decimal(inv.subtotal).quantize(AMT_PREC) or item_tot != Decimal(inv.grand_total).quantize(AMT_PREC):
+            lines_reconciled = False
+            break
+        if inv.dispatch is not None:
+            dispatch_rows = list(
+                db.scalars(
+                    select(StockLedger).where(
+                        StockLedger.reference_doc_type == "DISPATCH",
+                        StockLedger.reference_doc_id == inv.dispatch.dispatch_number,
+                        StockLedger.movement_type == MovementType.SALES_DISPATCH,
+                    )
+                ).all()
+            )
+            disp_qty = sum((Decimal(di.quantity) for di in inv.dispatch.items), Decimal("0.000000")).quantize(QTY_PREC)
+            led_qty = sum((Decimal(le.quantity_out) for le in dispatch_rows), Decimal("0.000000")).quantize(QTY_PREC)
+            if disp_qty != led_qty:
+                lines_reconciled = False
+                break
+
+    expected_filtered_sum = sum(
+        (
+            Decimal(it.line_total)
+            for inv in invoices
+            for it in inv.items
+            if not product_id or it.product_id == product_id
+        ),
+        Decimal("0.00"),
+    ).quantize(AMT_PREC)
     source_sum = sum((Decimal(i.grand_total) for i in invoices), Decimal("0.00")).quantize(AMT_PREC)
-    reconciled = (tot_val == source_sum) if not product_id else True
+    totals_match = (tot_val == source_sum) if not product_id else (tot_val == expected_filtered_sum)
+    reconciled = lines_reconciled and totals_match
 
     offset = (page - 1) * page_size
     return SalesRegisterReportOut(
@@ -556,11 +590,38 @@ def report_purchase_register(
         (r.total_purchase_amount for r in all_rows if r.status == PurchaseStatus.POSTED.value),
         Decimal("0.00"),
     ).quantize(AMT_PREC)
-    reconciled = (
+    purchases_reconciled = True
+    for p in purchases:
+        if p.status != PurchaseStatus.POSTED:
+            continue
+        item_sub = sum((Decimal(it.line_subtotal) for it in p.items), Decimal("0.00")).quantize(AMT_PREC)
+        if item_sub != Decimal(p.subtotal).quantize(AMT_PREC) or (
+            (Decimal(p.subtotal) + Decimal(p.tax_amount)).quantize(AMT_PREC)
+            != Decimal(p.total_amount).quantize(AMT_PREC)
+        ):
+            purchases_reconciled = False
+            break
+        pur_ledger = list(
+            db.scalars(
+                select(StockLedger).where(
+                    StockLedger.reference_doc_type == "PURCHASE",
+                    StockLedger.reference_doc_id == p.reference_number,
+                    StockLedger.movement_type == MovementType.PURCHASE_RECEIPT,
+                )
+            ).all()
+        )
+        expected_base = sum((Decimal(it.base_quantity) for it in p.items), Decimal("0.000000")).quantize(QTY_PREC)
+        ledger_in = sum((Decimal(le.quantity_in) for le in pur_ledger), Decimal("0.000000")).quantize(QTY_PREC)
+        if expected_base != ledger_in:
+            purchases_reconciled = False
+            break
+
+    header_matches = (
         abs(posted_line_tot - posted_tot.quantize(AMT_PREC)) <= Decimal("0.05")
         if not stock_item_id
         else True
     )
+    reconciled = purchases_reconciled and header_matches
 
     offset = (page - 1) * page_size
     return PurchaseRegisterReportOut(
@@ -676,13 +737,51 @@ def report_stock_summary(
             )
         )
 
+    has_entries_after_cutoff = any(
+        (
+            le.transaction_date
+            if le.transaction_date.tzinfo is not None
+            else le.transaction_date.replace(tzinfo=timezone.utc)
+        )
+        > cutoff_dt
+        for le in ledger_rows
+    )
+    balances_by_item = {
+        b.stock_item_id: b
+        for b in db.scalars(select(StockBalance)).all()
+    }
+    ledger_balance_ok = reconcile_stock_balances(db).all_reconciled
+    rows_arithmetic_ok = all(
+        (r.opening_stock + r.total_receipts - r.total_issues + r.adjustments).quantize(QTY_PREC)
+        == r.closing_stock
+        for r in rows
+    )
+    val_sum_ok = sum((r.stock_valuation for r in rows), Decimal("0.00")).quantize(AMT_PREC) == tot_val.quantize(
+        AMT_PREC
+    )
+    snapshot_matches_balance = True
+    if not has_entries_after_cutoff:
+        for r in rows:
+            bal = balances_by_item.get(r.stock_item_id)
+            bal_qty = Decimal(bal.available_quantity).quantize(QTY_PREC) if bal else Decimal("0.000000")
+            bal_val = (
+                Decimal(bal.total_value).quantize(AMT_PREC, rounding=ROUND_HALF_UP)
+                if bal and bal_qty > Decimal("0")
+                else Decimal("0.00")
+            )
+            if r.closing_stock != bal_qty or abs(r.stock_valuation - bal_val) > Decimal("0.01"):
+                snapshot_matches_balance = False
+                break
+
+    reconciled = ledger_balance_ok and rows_arithmetic_ok and val_sum_ok and snapshot_matches_balance
+
     return StockSummaryReportOut(
         date_range=dr,
         as_of_date=cutoff,
         category_filter=category.value if category else "ALL",
         rows=rows,
         total_valuation=tot_val.quantize(AMT_PREC),
-        reconciled_with_ledger=True,
+        reconciled_with_ledger=reconciled,
     )
 
 
@@ -802,12 +901,63 @@ def report_production_register(
             )
         )
 
+    runs_reconciled = (
+        sum(
+            (r.actual_good_output for r in rows if r.status in {ProductionStatus.COMPLETED.value, ProductionStatus.POSTED.value}),
+            Decimal("0"),
+        )
+        == tot_good
+        and sum(
+            (r.total_production_cost for r in rows if r.status in {ProductionStatus.COMPLETED.value, ProductionStatus.POSTED.value}),
+            Decimal("0.00"),
+        ).quantize(AMT_PREC)
+        == tot_cost.quantize(AMT_PREC)
+    )
+    if runs_reconciled:
+        for r in runs:
+            if r.status != ProductionStatus.POSTED:
+                continue
+            run_ledger = list(
+                db.scalars(
+                    select(StockLedger).where(
+                        StockLedger.reference_doc_type == "PRODUCTION_RUN",
+                        StockLedger.reference_doc_id == r.order_number,
+                    )
+                ).all()
+            )
+            issued_by_item: Dict[str, Decimal] = {}
+            output_qty = Decimal("0.000000")
+            for le in run_ledger:
+                if le.movement_type == MovementType.PRODUCTION_ISSUE:
+                    issued_by_item[le.stock_item_id] = (
+                        issued_by_item.get(le.stock_item_id, Decimal("0.000000"))
+                        + Decimal(le.quantity_out)
+                    ).quantize(QTY_PREC)
+                elif le.movement_type == MovementType.PRODUCTION_OUTPUT:
+                    output_qty = (output_qty + Decimal(le.quantity_in)).quantize(QTY_PREC)
+
+            expected_issues: Dict[str, Decimal] = {}
+            for mat in r.materials:
+                qty = Decimal(mat.total_consumed_base_qty).quantize(QTY_PREC)
+                if qty > Decimal("0"):
+                    expected_issues[mat.stock_item_id] = (
+                        expected_issues.get(mat.stock_item_id, Decimal("0.000000")) + qty
+                    ).quantize(QTY_PREC)
+
+            if issued_by_item != expected_issues:
+                runs_reconciled = False
+                break
+            expected_out = Decimal(r.actual_good_output).quantize(QTY_PREC)
+            if expected_out > Decimal("0") and output_qty != expected_out:
+                runs_reconciled = False
+                break
+
     return ProductionRegisterReportOut(
         date_range=dr,
         rows=rows,
         total_good_output=tot_good,
         total_production_cost=tot_cost.quantize(AMT_PREC),
-        reconciled_with_runs=True,
+        reconciled_with_runs=runs_reconciled,
     )
 
 
@@ -895,6 +1045,7 @@ def report_production_costing(
     tot_pkg = Decimal("0.00")
     tot_exp = Decimal("0.00")
     tot_all = Decimal("0.00")
+    cost_reconciled = True
     for r in runs:
         c = build_run_costing(db, r.id)
         tot_mat += c.raw_material_cost
@@ -903,6 +1054,59 @@ def report_production_costing(
         tot_all += c.total_production_cost
         rows.append(c.model_dump(mode="json"))
 
+        db_overhead = sum(
+            (
+                Decimal(e.amount)
+                for e in db.scalars(
+                    select(ProductionExpense).where(
+                        ProductionExpense.production_run_id == r.id,
+                        ProductionExpense.status == ExpenseStatus.POSTED,
+                    )
+                ).all()
+            ),
+            Decimal("0.00"),
+        ).quantize(AMT_PREC)
+        if db_overhead != c.total_overhead_cost.quantize(AMT_PREC):
+            cost_reconciled = False
+            continue
+
+        if r.status == ProductionStatus.POSTED:
+            issue_entries = list(
+                db.scalars(
+                    select(StockLedger).where(
+                        StockLedger.reference_doc_type == "PRODUCTION_RUN",
+                        StockLedger.reference_doc_id == r.order_number,
+                        StockLedger.movement_type == MovementType.PRODUCTION_ISSUE,
+                    )
+                ).all()
+            )
+            issued_ledger_val = sum(
+                (Decimal(le.total_value) for le in issue_entries),
+                Decimal("0.00"),
+            ).quantize(AMT_PREC, rounding=ROUND_HALF_UP)
+            issued_by_item: Dict[str, Decimal] = {}
+            for le in issue_entries:
+                issued_by_item[le.stock_item_id] = (
+                    issued_by_item.get(le.stock_item_id, Decimal("0.000000"))
+                    + Decimal(le.quantity_out)
+                ).quantize(QTY_PREC)
+            expected_by_item: Dict[str, Decimal] = {}
+            for mat in r.materials:
+                q = Decimal(mat.total_consumed_base_qty).quantize(QTY_PREC)
+                if q > Decimal("0"):
+                    expected_by_item[mat.stock_item_id] = (
+                        expected_by_item.get(mat.stock_item_id, Decimal("0.000000")) + q
+                    ).quantize(QTY_PREC)
+
+            if (
+                issued_ledger_val != (c.raw_material_cost + c.packaging_cost).quantize(AMT_PREC)
+                or issued_by_item != expected_by_item
+            ):
+                cost_reconciled = False
+
+    if (tot_mat + tot_pkg + tot_exp).quantize(AMT_PREC) != tot_all.quantize(AMT_PREC):
+        cost_reconciled = False
+
     return ProductionCostReportOut(
         date_range=dr,
         rows=rows,
@@ -910,7 +1114,7 @@ def report_production_costing(
         total_packaging_cost=tot_pkg.quantize(AMT_PREC),
         total_expense_cost=tot_exp.quantize(AMT_PREC),
         total_production_cost=tot_all.quantize(AMT_PREC),
-        reconciled_with_expenses_and_ledger=True,
+        reconciled_with_expenses_and_ledger=cost_reconciled,
     )
 
 
@@ -949,6 +1153,14 @@ def report_payments_register(
     tot_alloc = sum((Decimal(p.allocated_amount) for p in posted), Decimal("0.00")).quantize(AMT_PREC)
     tot_unalloc = sum((Decimal(p.unallocated_advance) for p in posted), Decimal("0.00")).quantize(AMT_PREC)
 
+    alloc_reconciled = all(
+        sum((Decimal(a.allocated_amount) for a in p.allocations), Decimal("0.00")).quantize(AMT_PREC)
+        == Decimal(p.allocated_amount).quantize(AMT_PREC)
+        and (Decimal(p.allocated_amount) + Decimal(p.unallocated_advance)).quantize(AMT_PREC)
+        == Decimal(p.amount_received).quantize(AMT_PREC)
+        for p in posted
+    )
+
     offset = (page - 1) * page_size
     return PaymentRegisterReportOut(
         date_range=dr,
@@ -959,7 +1171,8 @@ def report_payments_register(
         total_received=tot_rec,
         total_allocated=tot_alloc,
         total_unallocated=tot_unalloc,
-        reconciled_with_payments=(tot_rec == (tot_alloc + tot_unalloc).quantize(AMT_PREC)),
+        reconciled_with_payments=(tot_rec == (tot_alloc + tot_unalloc).quantize(AMT_PREC))
+        and alloc_reconciled,
     )
 
 
