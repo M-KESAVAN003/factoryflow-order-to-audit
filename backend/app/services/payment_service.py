@@ -247,7 +247,11 @@ def _apply_allocations(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This payment is already allocated to the specified invoice.",
             )
-        inv = db.scalar(select(Invoice).where(Invoice.id == row.invoice_id).with_for_update())
+        inv = db.scalar(
+            select(Invoice)
+            .where(Invoice.id == row.invoice_id)
+            .with_for_update(of=Invoice)
+        )
         if not inv:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
         if inv.customer_id != payment.customer_id:
@@ -379,7 +383,11 @@ def allocate_payment(
     actor: User,
     ip_address: str | None = None,
 ) -> Payment:
-    payment = db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
+    payment = db.scalar(
+        select(Payment)
+        .where(Payment.id == payment_id)
+        .with_for_update(of=Payment)
+    )
     if not payment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found.")
     if payment.status != CustomerPaymentStatus.POSTED:

@@ -51,7 +51,7 @@ def get_or_create_locked_balance(db: Session, stock_item_id: str) -> StockBalanc
     stmt = (
         select(StockBalance)
         .where(StockBalance.stock_item_id == stock_item_id)
-        .with_for_update()
+        .with_for_update(of=StockBalance)
     )
     balance = db.scalar(stmt)
     if balance is None:
