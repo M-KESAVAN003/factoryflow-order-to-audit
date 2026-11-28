@@ -43,7 +43,7 @@ FactoryFlow enforces strict role-based separation of duties across the five cano
 - **Phase 6 (Costing, Overheads & Payments)**: Actual weighted-avg material cost + posted expenses (`Labour`, `Gas`, `Power`), pre-GST margin, customer payments, allocation dedup, Customer Ledger/Statement, 5-bucket ageing.
 - **Phase 7 (Owner Dashboard & Audit Reporting)**: Owner Console (15 KPIs, 10 trends, alerts), Auditor Portal, 15 audit reports with historical `as_of_date` ledger reconstruction, `.xlsx`/`.csv`/`.pdf` exports.
 - **Phase 8 (Offline PWA & Idempotent Sync)**: Web manifest, icons, SW shell cache (`/api/*` bypass), IndexedDB offline queue, auto-sync on launch/`online`, price conflict detection (`NEEDS_REVIEW`), `POST /api/v1/orders/sync` with unique `idempotency_key`.
-- **Phase 9–10 (E2E Benchmark QA & Deployment)**: Safety-guarded benchmark reset-and-seed CLI, 115 automated tests (`89` backend `pytest` + `26` frontend `vitest`), Alembic `0001`–`0008` (`owner` role + DB-backed report reconciliations), GitHub Actions CI (`.github/workflows/ci.yml`), Render/Vercel configs, 2-page PDF design note, submission docs.
+- **Phase 9–10 (E2E Benchmark QA, PostgreSQL Verification & Cloud Deployment)**: Safety-guarded benchmark reset-and-seed CLI, **117** automated tests (**91** backend `pytest` + **26** frontend `vitest`), Alembic `0001`–`0008` (`owner` role + independent DB-backed report reconciliations + filtered purchase-register fix), GitHub Actions CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)), Vercel + Render + Neon PostgreSQL deployment, 2-page PDF design note, and Stage 3 PostgreSQL benchmark acceptance report.
 
 ## 7. Installation & Local Run Instructions (Docker-Free)
 
@@ -71,52 +71,54 @@ npm run dev
 docker compose up --build
 ```
 
-## 8. Environment Configuration
-- **Backend** ([backend/.env.example](backend/.env.example)): `DATABASE_URL`, `SECRET_KEY` (32+ chars), `ENVIRONMENT`, `CORS_ORIGINS`, `DEMO_SEED_ENABLED`, `DEMO_SEED_PASSWORD`. Never commit `.env`.
-- **Frontend** ([frontend/.env.example](frontend/.env.example)): `VITE_API_BASE_URL` (set to deployed Render `/api/v1` URL; never place secrets in `VITE_*` variables).
+## 8. Environment & Security Implementation
+- **Backend** ([backend/.env.example](backend/.env.example)): `DATABASE_URL`, `SECRET_KEY` (32+ random chars enforced on production startup), `ENVIRONMENT`, `CORS_ORIGINS`, `DEMO_SEED_ENABLED`, `DEMO_SEED_PASSWORD`. Real `.env`, `.env.*`, and credential files are excluded from Git via [.gitignore](.gitignore).
+- **Frontend** ([frontend/.env.example](frontend/.env.example)): `VITE_API_BASE_URL` (pointing to deployed Render `/api/v1` endpoint; zero secrets stored in `VITE_*` variables or IndexedDB).
+- **RBAC, Row Locking & Audit**: JWT auth + `bcrypt` password hashing, strict 5-role server permission matrix, append-only `StockLedger` (`before_update`/`before_delete` guards), PostgreSQL `SELECT ... FOR UPDATE OF` locking on stock allocations and payments, and immutable `audit_logs`.
 
-## 9. Demo Login Accounts (Isolated / Hosted Evaluation Only)
-`DEMO_SEED_ENABLED` defaults to `false` in `.env.example` and `render.yaml`. For local non-production testing or explicit one-time hosted demo seeding, set `DEMO_SEED_ENABLED=true` together with a unique strong `DEMO_SEED_PASSWORD` (**never reuse publicly documented sample passwords such as `FactoryFlow!2026` on any live public deployment**):
+## 9. Demo Login Accounts (Hosted Evaluation Only)
+`DEMO_SEED_ENABLED` defaults to `false` in `.env.example` and `render.yaml`. Demo seeding requires a unique strong `DEMO_SEED_PASSWORD` (`scripts.seed` and startup checks block weak or public sample passwords in `ENVIRONMENT=production`). Never publish live passwords in Git or documentation — share evaluator credentials privately:
 - **Factory Admin**: `admin@factoryflow.io` (`admin`)
 - **Factory Owner (Read-Only)**: `owner@factoryflow.io` (`owner`)
 - **Salesman A / Salesman B**: `orders@factoryflow.io`, `salesman_b@factoryflow.io` (`order_manager`)
 - **Production Supervisor**: `floor@factoryflow.io` (`floor_supervisor`)
 - **Accountant / Auditor**: `auditor@factoryflow.io` (`auditor`)
-- **QA Inspector (Optional)**: `qa@factoryflow.io` (`qa_inspector`)
+- **QA Inspector *(Optional)***: `qa@factoryflow.io` (`qa_inspector`)
 
-## 10. Benchmark Seed & Results (Murukku 200 g)
-Isolated reset-and-seed command (blocked from executing against production or main `DATABASE_URL`):
+## 10. Verified Manufacturing Benchmark Results (`Murukku 200 g`)
+Isolated reset-and-seed command (guarded against running on production or main `DATABASE_URL`):
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m scripts.benchmark_reset_seed --database-url sqlite:///./.benchmark_test_isolated.db
 ```
-Verified benchmark outputs (`Murukku 200 g`, selling price `₹50`, GST `5%`):
+Verified end-to-end across **both isolated SQLite CI and live Neon PostgreSQL `16.16`** (`factoryflow-test` branch, selling price `₹50`, GST `5%`):
 - **Flour**: `100 kg @ ₹42` + `60 kg @ ₹45` -> `160 kg @ ₹43.125/kg` (`₹6,900`); after `40 kg` issue -> **`120 kg`**.
 - **Production**: `188` good packets (`-6%` yield), Oil `+5%` (`19.5 L`), Spice `3.8 kg`, Pouches `306`, Cartons `21` (`8 packets remain unpacked`), Finished Goods **`238` packets**.
-- **Sales & Dispatch**: Retailer A `150` pkts -> Taxable `₹7,500`, CGST `₹187.50`, SGST `₹187.50`, Total `₹7,875`; Dispatch leaves **`88` packets**; Distributor B (`120` pkts) held with shortage **`32` packets** & `IGST 5%` (`₹300`) preview.
-- **Costing & Payment**: Material+Pkg `₹4,055` + Labour `₹1,200` + Gas `₹600` = **`₹5,855`** (`₹31.143617` exact / **`₹31.14`** display, profit `₹18.86`, margin **`37.71%`**); Payment `₹4,000` -> **`₹3,875` outstanding**.
+- **Sales & Dispatch**: Retailer A `150` pkts -> Taxable `₹7,500`, CGST `₹187.50`, SGST `₹187.50`, Total `₹7,875` (`%PDF-1.4`); Dispatch leaves **`88` packets**; Distributor B (`120` pkts) held in `AWAITING_STOCK` with shortage **`32` packets** & `IGST 5%` (`₹300`) preview and billing blocked.
+- **Costing & Payment**: Material+Pkg `₹4,055` + Labour `₹1,200` + Power/Gas `₹600` = **`₹5,855`** (`₹31.143617` exact / **`₹31.14`** display, profit `₹18.86`, margin **`37.71%`**); Payment `₹4,000` -> **`₹3,875` outstanding**.
 
-## 11. Automated Test Commands
+## 11. Automated Tests & CI (`117` Tests Passing)
+- **GitHub Actions CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)): Runs Alembic `upgrade head`, full backend `pytest`, frontend `vitest`, and `tsc -b && vite build` on `push`/`pull_request`.
 ```powershell
-# Backend (89 tests across Phases 1–10)
+# Backend (91 tests across Phases 1–10 + filtered purchase regression, isolated SQLite)
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v
 
-# Frontend (26 tests + production TypeScript/Vite build)
+# Frontend (26 tests across 9 Vitest files + production TypeScript/Vite build)
 cd frontend
 npm test
 npm run build
 ```
 
-## 12. Live Deployment, API Docs, Screenshots & Demo Video
-- **Live Frontend URL (Vercel)**: `<Pending external Vercel deployment by repository owner>`
-- **Live Backend `/health` URL (Render)**: `<Pending external Render deployment by repository owner>`
-- **API Documentation URL (Swagger)**: `<Pending Render deploy>/docs`
-- **Design Note (Max 2 Pages)**: [docs/DESIGN.md](docs/DESIGN.md) & [docs/DESIGN.pdf](docs/DESIGN.pdf)
-- **Demo Script (<= 8 Min)**: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) *(Demo Video URL: `<Pending manual screen recording>`)*
-- **Screenshots**: Capture live UI screens during demo recording from `/owner`, `/auditor`, `/production/variance`, `/invoices`, and `/sales/offline-order`.
-- **QA & Submission Docs**: [docs/FINAL_QA_REPORT.md](docs/FINAL_QA_REPORT.md), [docs/PHASE9_FINAL_VERIFICATION.md](docs/PHASE9_FINAL_VERIFICATION.md), [docs/OFFLINE_PWA.md](docs/OFFLINE_PWA.md), [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md).
+## 12. Live Deployment, API Docs & Submission Artifacts
+- **Public GitHub Repository**: `https://github.com/M-KESAVAN003/factoryflow-order-to-audit`
+- **Live Frontend URL (Vercel)**: `https://factoryflow-order-to-audit.vercel.app` (`HTTP 200` verified)
+- **Live Backend `/health` URL (Render)**: `https://factoryflow-api-g1eu.onrender.com/health` (`HTTP 200`, `{"status":"ok","service":"factoryflow-api","database":"connected"}`)
+- **Live Swagger API Docs**: `https://factoryflow-api-g1eu.onrender.com/docs` (`HTTP 200` verified)
+- **Design Note (`2` Pages)**: [docs/DESIGN.md](docs/DESIGN.md) & [docs/DESIGN.pdf](docs/DESIGN.pdf)
+- **Demo Script (`<= 8` Min)**: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) *(Demo Video URL & Screenshots: `<Pending manual screen recording>`)*
+- **Verification & Submission Docs**: [docs/STAGE3_POSTGRES_ACCEPTANCE_REPORT.md](docs/STAGE3_POSTGRES_ACCEPTANCE_REPORT.md), [docs/FINAL_QA_REPORT.md](docs/FINAL_QA_REPORT.md), [docs/PHASE9_FINAL_VERIFICATION.md](docs/PHASE9_FINAL_VERIFICATION.md), [docs/OFFLINE_PWA.md](docs/OFFLINE_PWA.md), [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md).
 
-## 13. Known Limitations & Future Improvements
-- **Limitations**: Local automated suites ran on isolated SQLite & JSDOM rather than a live Neon PostgreSQL instance or headless Chromium binary; offline quick orders capture one SKU per local entry; GST summaries are indicative internal worksheets.
-- **Future Improvements**: Multi-line offline cart in PWA IndexedDB, Playwright E2E CI pipeline against ephemeral PostgreSQL containers, e-Way bill / GSP API integration, and automated supplier payables ledger.
+## 13. Known Limitations, Pending Security Actions & Future Improvements
+- **Verification Scope**: Backend, frontend, live Render/Vercel connectivity, and the complete 10-step Stage 3 benchmark on isolated Neon PostgreSQL (`factoryflow-test`) are verified; **physical Android Chrome offline PWA execution remains `NOT VERIFIED`**, and **production Neon DB password & Render `SECRET_KEY` rotation remains `PENDING`** prior to public evaluator handover. Offline quick orders store one SKU per local queue entry, and GST reports are internal accounting summaries rather than GSTN portal filings.
+- **Future Improvements**: Multi-line offline cart in PWA IndexedDB, automated Playwright Chromium + PostgreSQL service containers in CI, e-Way bill / GSP API integration, and automated supplier payables ledger.

@@ -40,5 +40,5 @@ erDiagram
 - **GST Determination**: Compares factory state (`Tamil Nadu`) vs customer state. Intra-state splits 5% equally (`2.5% CGST + 2.5% SGST` -> `₹7,500 + ₹187.50 + ₹187.50 = ₹7,875`); inter-state charges `5% IGST`. Posted invoices are immutable; dispatch independently deducts finished stock (`238 -> 88` pkts).
 
 ## 6. Payment Allocation & Immutable Audit Trail
-- **Payments & Receivables**: `payments` and `payment_allocations` enforce unique `(payment_id, invoice_id)`, prevent over-allocation, and sum only `POSTED` allocations (`₹7,875 - ₹4,000 = ₹3,875` outstanding across 5 ageing buckets).
+- **Payments & Receivables**: `payments` and `payment_allocations` enforce unique `(payment_id, invoice_id)`, acquire PostgreSQL row locks (`SELECT ... FOR UPDATE OF payments` and `FOR UPDATE OF invoices`) during allocation, prevent over-allocation, and sum only `POSTED` allocations (`₹7,875 - ₹4,000 = ₹3,875` outstanding across 5 ageing buckets).
 - **Audit Trail**: Every login, CRUD action, stock post/adjustment, BOM/production change, invoice/dispatch/payment, and offline sync replay (`idempotency_key`) logs actor, role, resource ID, timestamp, and IP to immutable `audit_logs`.

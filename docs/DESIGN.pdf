@@ -3,80 +3,96 @@
 2 0 obj << /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >> endobj
 3 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Courier >> endobj
 4 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >> endobj
-5 0 obj << /Length 2166 >>
+5 0 obj << /Length 3002 >>
 stream
 BT
-/F1 9 Tf
-40 745 Td
-15 TL
-(FACTORYFLOW - SYSTEM DESIGN NOTE \\(PAGE 1 OF 2\\)) Tj
+/F1 8.5 Tf
+32 760 Td
+15.5 TL
+(FACTORYFLOW - ORDER-TO-AUDIT MANUFACTURING ERP DESIGN NOTE \(PAGE 1 OF 2\)) Tj
 T* (====================================================================================) Tj
-T* (1. ARCHITECTURE & TECH STACK) Tj
-T* (   React 18 + TypeScript + Tailwind + Vite 6 PWA <-> FastAPI + SQLAlchemy 2 + PG) Tj
-T* (   IndexedDB + Service Worker \\(sw.js\\) offline queue -> /api/v1/orders/sync) Tj
-T* (   Decimal + PostgreSQL NUMERIC arithmetic across GST, costing, ledger & ageing.) Tj
+T* (1. ARCHITECTURE OVERVIEW & TECHNOLOGY STACK) Tj
+T* (  Frontend : React 18.3, TypeScript 5.6, Tailwind CSS 3.4, Vite 6.4 PWA) Tj
+T* (             \(IndexedDB factoryflow_offline_db + Service Worker public/sw.js\)) Tj
+T* (  Backend  : Python 3.13, FastAPI 0.115, SQLAlchemy 2.0 \(Decimal & PG NUMERIC\),) Tj
+T* (             Pydantic v2, Alembic \(0001-0008\), PyJWT + bcrypt RBAC.) Tj
+T* (  Roles    : 5 mandatory business roles \(admin, owner [read-only], order_manager,) Tj
+T* (             floor_supervisor, auditor\) plus optional qa_inspector.) Tj
+T* (  Database : Managed Neon PostgreSQL 16 \(sslmode=require, psycopg v3\). Independent) Tj
+T* (             report reconciliation verifies StockLedger, StockBalance, Production,) Tj
+T* (             Invoices, Dispatches, Payments, and PaymentAllocations directly.) Tj
 T* () Tj
-T* (2. CORE ENTITY RELATIONSHIPS) Tj
-T* (   USERS -> SALES_ORDERS -> INVOICES \\(1:1 immutable\\) & DISPATCHES \\(1:1\\)) Tj
-T* (   PRODUCTS -> BOM_HEADERS \\(versioned\\) -> BOM_LINES -> STOCK_ITEMS) Tj
-T* (   PRODUCTION_RUNS \\(pins bom_id + bom_version_snapshot\\) -> MATERIALS / EXPENSES) Tj
-T* (   STOCK_ITEMS -> STOCK_BALANCES \\(1:1 projection\\) & STOCK_LEDGER \\(append-only\\)) Tj
-T* (   CUSTOMERS -> PAYMENTS -> PAYMENT_ALLOCATIONS -> INVOICES) Tj
+T* (2. CORE ENTITY RELATIONSHIPS \(ORDER-TO-AUDIT TRACEABILITY\)) Tj
+T* (  USERS ----------------> SALES_ORDERS ---> INVOICES \(1:1 immutable\) & DISPATCHES) Tj
+T* (  PRODUCTS -------------> BOM_HEADERS \(versioned\) ---> BOM_LINES ---> STOCK_ITEMS) Tj
+T* (  PRODUCTION_RUNS \(pins bom_id & snapshot\) ---> PRODUCTION_MATERIALS / EXPENSES) Tj
+T* (  STOCK_ITEMS ----------> STOCK_BALANCES \(1:1 projection\) & STOCK_LEDGER \(append-only\)) Tj
+T* (  CUSTOMERS ------------> PAYMENTS ---> PAYMENT_ALLOCATIONS ---> INVOICES) Tj
 T* () Tj
 T* (3. APPEND-ONLY STOCK LEDGER & WEIGHTED-AVERAGE VALUATION) Tj
-T* (   StockLedger enforces SQLAlchemy before_update / before_delete hooks.) Tj
-T* (   Mistakes emit traceable REVERSAL movements linked to source document IDs.) Tj
-T* (   Weighted Avg Rate = \\(Old Value + Receipt Value\\) / \\(Old Qty + Receipt Qty\\).) Tj
-T* (   Benchmark Flour: \\(100 kg * 42 + 60 kg * 45\\) / 160 kg = Rs 43.125/kg \\(Rs 6,900\\).) Tj
-T* (   Historical balances \\(as_of_date\\) replay StockLedger rows <= cutoff_dt.) Tj
+T* (  - Immutability: StockLedger enforces SQLAlchemy before_update/before_delete hooks;) Tj
+T* (    corrections emit traceable REVERSAL rows referencing source document IDs.) Tj
+T* (  - Valuation: Avg Cost = \(Old Value + Receipt Value\) / \(Old Qty + Receipt Qty\).) Tj
+T* (    Benchmark Flour: \(100 kg * 42 + 60 kg * 45\) / 160 kg = Rs 43.125/kg \(Rs 6,900\).) Tj
+T* (  - Historical cut-off reports \(as_of_date\) replay StockLedger rows <= cutoff_dt.) Tj
 T* () Tj
-T* (4. BOM CONSUMPTION & PRODUCTION VARIANCE) Tj
-T* (   Runs scale BOM lines & snapshot exact version so future BOM edits stay isolated.) Tj
-T* (   Consumed qty = actual_qty + damaged_qty \\(188 good + 6 damaged = 194 pouches\\).) Tj
-T* (   Variance % = \\(\\(Actual - Planned\\) / Planned\\) * 100 against 3% tolerance:) Tj
-T* (   GREEN \\(<2.25%\\), ORANGE \\(2.25%..3.00%\\), RED \\(>3.00% exceeding tolerance\\).) Tj
-T* (   Benchmark Run: Yield -6% \\(188/200\\), Oil +5%, Pouches -3%, Cartons -10% \\(8 unpacked\\).) Tj
+T* (4. BOM SNAPSHOTS, CONSUMPTION & PRODUCTION VARIANCE ENGINE) Tj
+T* (  - Runs scale BOM lines and pin bom_id + bom_version_snapshot; later BOM versions) Tj
+T* (    do not alter historical runs. Consumed qty = actual_qty + damaged_qty.) Tj
+T* (  - Output posts actual_good_output to Finished Goods and warns on unpacked packets.) Tj
+T* (  - Variance % = \(\(Actual - Planned\) / Planned\) * 100 against 3% tolerance bands:) Tj
+T* (    GREEN \(<2.25%\), ORANGE \(2.25%-3.00%\), RED \(>3.00% exceeding tolerance\).) Tj
+T* (  - Benchmark Run: Yield -6% \(188/200\), Oil +5% \(10.5/10\), Pouches -3% \(188+6=194\),) Tj
+T* (    Cartons -10% \(9/10 -> warning: 8 packets remain unpacked\), Closing FG = 238 pkts.) Tj
 T* () Tj
 T* (====================================================================================) Tj
-T* (Page 1 of 2 - FactoryFlow Architecture & Ledger Design) Tj
+T* (Page 1 of 2 - FactoryFlow Architecture, Ledger & BOM Production Design) Tj
 ET
 endstream
 endobj
 6 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >> endobj
-7 0 obj << /Length 2082 >>
+7 0 obj << /Length 2708 >>
 stream
 BT
-/F1 9 Tf
-40 745 Td
-15 TL
-(FACTORYFLOW - SYSTEM DESIGN NOTE \\(PAGE 2 OF 2\\)) Tj
+/F1 8.5 Tf
+32 760 Td
+15.5 TL
+(FACTORYFLOW - ORDER-TO-AUDIT MANUFACTURING ERP DESIGN NOTE \(PAGE 2 OF 2\)) Tj
 T* (====================================================================================) Tj
-T* (5. PRODUCTION COSTING FORMULA) Tj
-T* (   Material & Pkg Cost reads StockLedger PRODUCTION_ISSUE \\(actual, not planned\\):) Tj
-T* (   Flour 1,725 + Oil 1,470 + Spice 240 + Pouches 485 + Cartons 135 = Rs 4,055.00.) Tj
-T* (   Overheads \\(posted ProductionExpense\\): Labour Rs 1,200 + Gas Rs 600 = Rs 1,800.00.) Tj
-T* (   Total Run Cost = Rs 5,855.00 / 188 good packets = Rs 31.143617 \\(Display Rs 31.14\\).) Tj
-T* (   Pre-GST Unit Profit = Rs 50.00 - Rs 31.143617 = Rs 18.86 \\(Gross Margin 37.71%\\).) Tj
+T* (5. ACTUAL WEIGHTED-AVERAGE PRODUCTION COSTING & MARGIN) Tj
+T* (  - Material & packaging cost reads StockLedger PRODUCTION_ISSUE \(actual, not plan\):) Tj
+T* (    Flour 1,725 + Oil 1,470 + Spice 240 + Pouches 485 + Cartons 135 = Rs 4,055.00.) Tj
+T* (  - Overheads read posted ProductionExpense rows: Labour Rs 1,200 + Power/Gas Rs 600) Tj
+T* (    = Rs 1,800.00. Total Run Cost = Rs 5,855.00 / 188 good pkts = Rs 31.143617) Tj
+T* (    \(Display Rs 31.14\). Pre-GST Unit Profit = Rs 50.00 - 31.143617 = Rs 18.86) Tj
+T* (    \(Gross Margin 37.71%\).) Tj
 T* () Tj
-T* (6. STATE-AWARE GST CALCULATION & DISPATCH ISOLATION) Tj
-T* (   Compares factory state \\(Tamil Nadu, 33\\) against customer Place of Supply:) Tj
-T* (   Intra-state splits GST equally: Retailer A 150*50 = 7,500 + CGST 187.50 + SGST 187.50.) Tj
-T* (   Inter-state applies IGST: Distributor B \\(KA\\) 120*50 = 6,000 + IGST 300 = 6,300.) Tj
-T* (   Shortage Check locks StockBalance FOR UPDATE: holds AWAITING_STOCK \\(shortage 32\\).) Tj
-T* (   Dispatches atomically deduct StockLedger SALES_DISPATCH \\(238 - 150 = 88 FG\\).) Tj
+T* (6. STATE-AWARE GST CALCULATION, SHORTAGE CONTROL & DISPATCH ISOLATION) Tj
+T* (  - Compares factory state \(Tamil Nadu, 33\) against customer Place of Supply:) Tj
+T* (    Intra-state splits 5% GST equally \(2.5% CGST + 2.5% SGST\):) Tj
+T* (      Retailer A \(TN\) 150 * 50 = Rs 7,500 + CGST 187.50 + SGST 187.50 = Rs 7,875.) Tj
+T* (    Inter-state applies 5% IGST:) Tj
+T* (      Distributor B \(KA\) 120 * 50 = Rs 6,000 + IGST 300 = Rs 6,300 preview.) Tj
+T* (  - Order approval locks StockBalance FOR UPDATE: Retailer A dispatches 150 pkts) Tj
+T* (    \(FG 238 -> 88\); Distributor B \(120 vs 88\) is held in AWAITING_STOCK \(shortage) Tj
+T* (    32 pkts\) with billing & dispatch blocked \(HTTP 422\).) Tj
 T* () Tj
-T* (7. PAYMENT ALLOCATION & RECEIVABLES AGEING) Tj
-T* (   PaymentAllocation enforces unique \\(payment_id, invoice_id\\) preventing double count.) Tj
-T* (   Outstanding = Invoice Total - Posted Allocations - CreditNotes \\(7,875 - 4,000 = 3,875\\).) Tj
-T* (   Ageing buckets: Current, 1-30d, 31-60d, 61-90d, >90d overdue.) Tj
+T* (7. POSTGRESQL ROW-LOCKED PAYMENTS, RECEIVABLES & AUDIT REPORTING) Tj
+T* (  - Payment allocation executes PostgreSQL SELECT ... FOR UPDATE OF payments and) Tj
+T* (    FOR UPDATE OF invoices, enforces unique \(payment_id, invoice_id\), prevents) Tj
+T* (    over-allocation, and reconciles Rs 7,875 - Rs 4,000 paid = Rs 3,875 outstanding) Tj
+T* (    across 5 ageing buckets \(Current, 1-30d, 31-60d, 61-90d, >90d\).) Tj
+T* (  - 15 read-only Auditor & Owner reports + CSV/XLSX/PDF exports verify DB totals.) Tj
 T* () Tj
-T* (8. AUDIT TRAIL & OFFLINE PWA IDEMPOTENCY) Tj
-T* (   AuditLogs trace actor, role, action, resource_id & IP \\(no DELETE endpoint\\).) Tj
-T* (   Offline PWA queues orders in IndexedDB; /orders/sync enforces unique idempotency_key,) Tj
-T* (   preserves submitted_unit_price, flags price drift NEEDS_REVIEW, submits as SUBMITTED.) Tj
+T* (8. OFFLINE PWA SYNCHRONIZATION & IMMUTABLE AUDIT TRAIL) Tj
+T* (  - IndexedDB stores non-sensitive session metadata & timestamped price catalog only) Tj
+T* (    \(zero passwords/JWT secrets\). POST /api/v1/orders/sync enforces unique) Tj
+T* (    idempotency_key \(safe replay duplicate=true\), submits strictly as SUBMITTED) Tj
+T* (    without offline invoicing/dispatch, and flags stale prices as NEEDS_REVIEW.) Tj
+T* (  - Immutable audit_logs record actor, role, action, resource_id & IP \(no DELETE\).) Tj
 T* () Tj
 T* (====================================================================================) Tj
-T* (Page 2 of 2 - FactoryFlow Costing, GST, Payments & Audit Design) Tj
+T* (Page 2 of 2 - FactoryFlow Costing, GST, Row-Locked Payments & Offline Design) Tj
 ET
 endstream
 endobj
@@ -88,9 +104,9 @@ xref
 0000000121 00000 n 
 0000000189 00000 n 
 0000000315 00000 n 
-0000002533 00000 n 
-0000002659 00000 n 
+0000003369 00000 n 
+0000003495 00000 n 
 trailer << /Size 8 /Root 1 0 R >>
 startxref
-4793
+6255
 %%EOF

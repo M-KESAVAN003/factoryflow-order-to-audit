@@ -550,9 +550,9 @@ def report_purchase_register(
         ]
         if not matching_items:
             continue
+        matching_line_total = Decimal("0.00")
         for it in matching_items:
             sub = Decimal(it.line_subtotal).quantize(AMT_PREC)
-            tot = Decimal(it.line_subtotal).quantize(AMT_PREC)
             # Proportionately include header tax_amount only if recorded on purchase header
             if Decimal(p.subtotal) > Decimal("0") and Decimal(p.tax_amount) > Decimal("0"):
                 gst = ((Decimal(it.line_subtotal) / Decimal(p.subtotal)) * Decimal(p.tax_amount)).quantize(
@@ -561,6 +561,7 @@ def report_purchase_register(
             else:
                 gst = Decimal("0.00")
             line_tot = (sub + gst).quantize(AMT_PREC)
+            matching_line_total += line_tot
             all_rows.append(
                 PurchaseRegisterRow(
                     purchase_id=p.id,
@@ -578,13 +579,15 @@ def report_purchase_register(
                     status=p.status.value,
                 )
             )
-        if not stock_item_id:
-            if p.status == PurchaseStatus.POSTED:
-                posted_tot += Decimal(p.total_amount)
-            elif p.status == PurchaseStatus.CANCELLED:
-                cancel_tot += Decimal(p.total_amount)
-            else:
-                draft_tot += Decimal(p.total_amount)
+        # Unfiltered totals retain full purchase header amounts; stock-item-filtered totals
+        # sum only the matching line amounts (including pro-rata header GST) across all rows.
+        bucket_amount = Decimal(p.total_amount) if not stock_item_id else matching_line_total
+        if p.status == PurchaseStatus.POSTED:
+            posted_tot += bucket_amount
+        elif p.status == PurchaseStatus.CANCELLED:
+            cancel_tot += bucket_amount
+        else:
+            draft_tot += bucket_amount
 
     posted_line_tot = sum(
         (r.total_purchase_amount for r in all_rows if r.status == PurchaseStatus.POSTED.value),
@@ -593,6 +596,8 @@ def report_purchase_register(
     purchases_reconciled = True
     for p in purchases:
         if p.status != PurchaseStatus.POSTED:
+            continue
+        if stock_item_id and not any(it.stock_item_id == stock_item_id for it in p.items):
             continue
         item_sub = sum((Decimal(it.line_subtotal) for it in p.items), Decimal("0.00")).quantize(AMT_PREC)
         if item_sub != Decimal(p.subtotal).quantize(AMT_PREC) or (
@@ -615,13 +620,28 @@ def report_purchase_register(
         if expected_base != ledger_in:
             purchases_reconciled = False
             break
+        if stock_item_id:
+            filtered_expected_base = sum(
+                (Decimal(it.base_quantity) for it in p.items if it.stock_item_id == stock_item_id),
+                Decimal("0.000000"),
+            ).quantize(QTY_PREC)
+            filtered_ledger_in = sum(
+                (Decimal(le.quantity_in) for le in pur_ledger if le.stock_item_id == stock_item_id),
+                Decimal("0.000000"),
+            ).quantize(QTY_PREC)
+            if filtered_expected_base != filtered_ledger_in:
+                purchases_reconciled = False
+                break
 
-    header_matches = (
-        abs(posted_line_tot - posted_tot.quantize(AMT_PREC)) <= Decimal("0.05")
-        if not stock_item_id
-        else True
-    )
-    reconciled = purchases_reconciled and header_matches
+    if not stock_item_id:
+        # Compare independent DB purchase headers (posted_tot) against summed line amounts.
+        reconciled = purchases_reconciled and (
+            abs(posted_line_tot - posted_tot.quantize(AMT_PREC)) <= Decimal("0.05")
+        )
+    else:
+        # When filtered by stock_item_id, posted_tot is line-derived; rely on independent
+        # DB header integrity + StockLedger reconciliation checks without self-comparison.
+        reconciled = purchases_reconciled
 
     offset = (page - 1) * page_size
     return PurchaseRegisterReportOut(

@@ -373,3 +373,208 @@ def test_report_reconciliations_detect_database_mismatches(client, db_session):
     assert client.get("/api/v1/reports/production?preset=all", headers=owner_headers).json()["reconciled_with_runs"] is False
     run.actual_good_output = orig_good
     db_session.commit()
+
+
+def test_purchase_register_stock_item_filter_and_reconciliation(client, db_session):
+    """Verify stock_item_id filtering computes line-level totals incl. allocated GST without masking DB mismatches."""
+    from sqlalchemy import text
+
+    from app.models.inventory import MovementType, StockLedger
+    from app.models.purchase import PaymentStatus, Purchase, PurchaseStatus
+    from app.models.supplier import Supplier
+    from app.schemas.inventory_purchase import PurchaseCreate, PurchaseItemInput
+    from app.services.purchase_service import create_purchase, post_purchase
+
+    seed_benchmark_master_data(db_session)
+    seed_phase3_benchmark_data(db_session, post_benchmark_purchase=True)
+
+    admin = db_session.scalar(select(User).where(User.role == Role.ADMIN))
+    supplier = db_session.scalar(select(Supplier).where(Supplier.name == "Benchmark Supplier").limit(1))
+    items = {si.sku: si for si in db_session.scalars(select(StockItem)).all()}
+    auditor_headers = auth_headers_for(client, Role.AUDITOR)
+
+    # 1. Multi-item POSTED purchase with 5% GST: Flour 500 + 25 = 525.00; Oil 700 + 35 = 735.00 (total 1,260.00)
+    multi_posted = create_purchase(
+        db_session,
+        PurchaseCreate(
+            reference_number="PUR-MULTI-POSTED-01",
+            supplier_id=supplier.id,
+            purchase_date=date.today(),
+            payment_status=PaymentStatus.PAID,
+            items=[
+                PurchaseItemInput(
+                    stock_item_id=items["RM-FLOUR"].id,
+                    unit_id=items["RM-FLOUR"].base_unit_id,
+                    quantity=Decimal("10.000000"),
+                    unit_rate=Decimal("50.000000"),
+                    tax_rate=Decimal("5.00"),
+                ),
+                PurchaseItemInput(
+                    stock_item_id=items["RM-OIL"].id,
+                    unit_id=items["RM-OIL"].base_unit_id,
+                    quantity=Decimal("5.000000"),
+                    unit_rate=Decimal("140.000000"),
+                    tax_rate=Decimal("5.00"),
+                ),
+            ],
+        ),
+        actor=admin,
+    )
+    post_purchase(db_session, multi_posted.id, actor=admin)
+
+    # 2. Multi-item DRAFT purchase: Flour 200.00 + Oil 300.00 (total 500.00)
+    create_purchase(
+        db_session,
+        PurchaseCreate(
+            reference_number="PUR-MULTI-DRAFT-01",
+            supplier_id=supplier.id,
+            purchase_date=date.today(),
+            payment_status=PaymentStatus.UNPAID,
+            items=[
+                PurchaseItemInput(
+                    stock_item_id=items["RM-FLOUR"].id,
+                    unit_id=items["RM-FLOUR"].base_unit_id,
+                    quantity=Decimal("4.000000"),
+                    unit_rate=Decimal("50.000000"),
+                    tax_rate=Decimal("0.00"),
+                ),
+                PurchaseItemInput(
+                    stock_item_id=items["RM-OIL"].id,
+                    unit_id=items["RM-OIL"].base_unit_id,
+                    quantity=Decimal("2.000000"),
+                    unit_rate=Decimal("150.000000"),
+                    tax_rate=Decimal("0.00"),
+                ),
+            ],
+        ),
+        actor=admin,
+    )
+
+    # 3. Multi-item CANCELLED purchase: Flour 100.00 + Spice 200.00 (total 300.00)
+    multi_cancel = create_purchase(
+        db_session,
+        PurchaseCreate(
+            reference_number="PUR-MULTI-CANCEL-01",
+            supplier_id=supplier.id,
+            purchase_date=date.today(),
+            payment_status=PaymentStatus.UNPAID,
+            items=[
+                PurchaseItemInput(
+                    stock_item_id=items["RM-FLOUR"].id,
+                    unit_id=items["RM-FLOUR"].base_unit_id,
+                    quantity=Decimal("2.000000"),
+                    unit_rate=Decimal("50.000000"),
+                    tax_rate=Decimal("0.00"),
+                ),
+                PurchaseItemInput(
+                    stock_item_id=items["RM-SPICE"].id,
+                    unit_id=items["RM-SPICE"].base_unit_id,
+                    quantity=Decimal("1.000000"),
+                    unit_rate=Decimal("200.000000"),
+                    tax_rate=Decimal("0.00"),
+                ),
+            ],
+        ),
+        actor=admin,
+    )
+    cancel_resp = client.post(
+        f"/api/v1/purchases/{multi_cancel.id}/cancel",
+        headers=auth_headers_for(client, Role.ADMIN),
+        json={"reason": "Cancelled order regression test"},
+    )
+    assert cancel_resp.status_code == 200
+
+    # Unfiltered totals preserve full purchase header totals (2700 + 1260 = 3960, draft 500, cancelled 300)
+    unfiltered = client.get("/api/v1/reports/purchases?preset=all", headers=auditor_headers).json()
+    assert unfiltered["total"] == 7
+    assert Decimal(unfiltered["posted_total"]) == Decimal("3960.00")
+    assert Decimal(unfiltered["draft_or_reviewed_total"]) == Decimal("500.00")
+    assert Decimal(unfiltered["cancelled_total"]) == Decimal("300.00")
+    assert unfiltered["reconciled_with_purchases"] is True
+
+    # Flour filter: posted 2700 + 525 = 3225.00 (incl. allocated GST), draft 200.00, cancelled 100.00
+    flour_rep = client.get(
+        f"/api/v1/reports/purchases?preset=all&stock_item_id={items['RM-FLOUR'].id}",
+        headers=auditor_headers,
+    ).json()
+    assert flour_rep["total"] == 4
+    assert Decimal(flour_rep["posted_total"]) == Decimal("3225.00")
+    assert Decimal(flour_rep["draft_or_reviewed_total"]) == Decimal("200.00")
+    assert Decimal(flour_rep["cancelled_total"]) == Decimal("100.00")
+    assert flour_rep["reconciled_with_purchases"] is True
+
+    # Pagination independence: page_size=1 returns 1 row while totals reflect all 4 matching rows
+    flour_paged = client.get(
+        f"/api/v1/reports/purchases?preset=all&stock_item_id={items['RM-FLOUR'].id}&page=1&page_size=1",
+        headers=auditor_headers,
+    ).json()
+    assert flour_paged["total"] == 4
+    assert len(flour_paged["rows"]) == 1
+    assert Decimal(flour_paged["posted_total"]) == Decimal("3225.00")
+    assert Decimal(flour_paged["draft_or_reviewed_total"]) == Decimal("200.00")
+    assert Decimal(flour_paged["cancelled_total"]) == Decimal("100.00")
+
+    # Oil filter: posted 735.00, draft 300.00, cancelled 0.00
+    oil_rep = client.get(
+        f"/api/v1/reports/purchases?preset=all&stock_item_id={items['RM-OIL'].id}",
+        headers=auditor_headers,
+    ).json()
+    assert oil_rep["total"] == 2
+    assert Decimal(oil_rep["posted_total"]) == Decimal("735.00")
+    assert Decimal(oil_rep["draft_or_reviewed_total"]) == Decimal("300.00")
+    assert Decimal(oil_rep["cancelled_total"]) == Decimal("0.00")
+    assert oil_rep["reconciled_with_purchases"] is True
+
+    # Empty filtered result
+    empty_rep = client.get(
+        f"/api/v1/reports/purchases?preset=all&stock_item_id={items['PKG-CARTON'].id}",
+        headers=auditor_headers,
+    ).json()
+    assert empty_rep["total"] == 0
+    assert empty_rep["rows"] == []
+    assert Decimal(empty_rep["posted_total"]) == Decimal("0.00")
+    assert Decimal(empty_rep["draft_or_reviewed_total"]) == Decimal("0.00")
+    assert Decimal(empty_rep["cancelled_total"]) == Decimal("0.00")
+    assert empty_rep["reconciled_with_purchases"] is True
+
+    # Filtered query must NOT mask database mismatches on header or stock ledger
+    orig_tot = multi_posted.total_amount
+    multi_posted.total_amount = Decimal("99999.00")
+    db_session.commit()
+    assert (
+        client.get(
+            f"/api/v1/reports/purchases?preset=all&stock_item_id={items['RM-FLOUR'].id}",
+            headers=auditor_headers,
+        ).json()["reconciled_with_purchases"]
+        is False
+    )
+    multi_posted.total_amount = orig_tot
+    db_session.commit()
+
+    led = db_session.scalar(
+        select(StockLedger).where(
+            StockLedger.reference_doc_type == "PURCHASE",
+            StockLedger.reference_doc_id == "PUR-MULTI-POSTED-01",
+            StockLedger.stock_item_id == items["RM-FLOUR"].id,
+            StockLedger.movement_type == MovementType.PURCHASE_RECEIPT,
+        )
+    )
+    orig_qty_in = led.quantity_in
+    db_session.execute(
+        text("UPDATE stock_ledger SET quantity_in = :val WHERE id = :id"),
+        {"val": "999.000000", "id": led.id},
+    )
+    db_session.commit()
+    db_session.expire_all()
+    assert (
+        client.get(
+            f"/api/v1/reports/purchases?preset=all&stock_item_id={items['RM-FLOUR'].id}",
+            headers=auditor_headers,
+        ).json()["reconciled_with_purchases"]
+        is False
+    )
+    db_session.execute(
+        text("UPDATE stock_ledger SET quantity_in = :val WHERE id = :id"),
+        {"val": str(orig_qty_in), "id": led.id},
+    )
+    db_session.commit()
